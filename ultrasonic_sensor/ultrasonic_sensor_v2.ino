@@ -1,119 +1,140 @@
-// 定義超音波感測器的腳位
-const int TRIG_PIN = 9;    // 觸發腳位
-const int ECHO_PIN = 10;   // 接收腳位
-const int LED_PIN = 3;     // LED 腳位
-const int BUZZER_PIN = 11; // 蜂鳴器腳位
+// 互動歡迎機器人
+#include <Servo.h>
 
-// 定義常數
-const int DISTANCE_THRESHOLD = 20;  // LED 觸發距離閾值（公分）
-const int MEASURE_INTERVAL = 200;   // 測量間隔（毫秒）
-const int MAX_DISTANCE = 400;       // 最大測量距離（公分）
-const int SAMPLES = 5;              // 平均值計算的樣本數
+// 感測器腳位
+const int trigPin = 9;
+const int echoPin = 10;
+const int buzzerPin = 7;
+const int buttonPin = 8;
+const int mercuryPin = 12;
 
-// 定義蜂鳴器相關常數
-const int MIN_DISTANCE = 5;         // 最小警告距離（公分）
-const int WARNING_DISTANCE = 30;    // 警告距離（公分）
-const int MIN_FREQ = 200;          // 最低頻率（Hz）
-const int MAX_FREQ = 2000;         // 最高頻率（Hz）
+// LED 腳位
+const int ledPins[5] = {2, 3, 4, 5, 6};
 
-// 用於計算平均值的陣列
-int distances[SAMPLES];
-int sampleIndex = 0;
+// 伺服馬達
+Servo myServo;
+const int servoPin = 11;
+
+// 狀態變數
+bool welcomeMode = true;
+
+// 新增變數
+const unsigned long DEBOUNCE_DELAY = 50;    // 防彈跳延遲時間（毫秒）
+unsigned long lastButtonPress = 0;           // 上次按鈕按下的時間
+unsigned long lastDetectionTime = 0;         // 上次偵測觸發的時間
+const unsigned long DETECTION_COOLDOWN = 3000; // 偵測冷卻時間（毫秒）
 
 void setup() {
-  // 初始化序列通訊
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(mercuryPin, INPUT);
+
+  for (int i = 0; i < 5; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    digitalWrite(ledPins[i], LOW);
+  }
+
+  myServo.attach(servoPin);
+  myServo.write(90);  // 初始位置
+
   Serial.begin(9600);
-  
-  // 設定腳位模式
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
-  
-  // 初始化距離陣列
-  for (int i = 0; i < SAMPLES; i++) {
-    distances[i] = 0;
-  }
-}
-
-// 測量距離的函數
-int measureDistance() {
-  // 發送觸發信號
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-  
-  // 讀取回傳時間
-  long duration = pulseIn(ECHO_PIN, HIGH, 23529);  // 設定超時時間為最大距離
-  
-  // 檢查是否超時
-  if (duration == 0) {
-    return MAX_DISTANCE;
-  }
-  
-  // 計算距離（聲速為343.2m/s，來回距離要除以2）
-  int distance = duration * 0.0343 / 2;
-  
-  // 確保距離在有效範圍內
-  return constrain(distance, 0, MAX_DISTANCE);
-}
-
-// 計算平均距離
-int getAverageDistance() {
-  // 更新距離陣列
-  distances[sampleIndex] = measureDistance();
-  sampleIndex = (sampleIndex + 1) % SAMPLES;
-  
-  // 計算平均值
-  long sum = 0;
-  for (int i = 0; i < SAMPLES; i++) {
-    sum += distances[i];
-  }
-  return sum / SAMPLES;
-}
-
-// 根據距離計算蜂鳴器頻率
-int calculateBuzzerFrequency(int distance) {
-  if (distance >= WARNING_DISTANCE) {
-    return 0; // 距離大於警告距離時不發聲
-  }
-  
-  // 將距離映射到頻率範圍
-  // 距離越近，頻率越高
-  if (distance < MIN_DISTANCE) {
-    return MAX_FREQ;
-  }
-  
-  return map(distance, MIN_DISTANCE, WARNING_DISTANCE, MAX_FREQ, MIN_FREQ);
-}
-
-// 控制蜂鳴器發聲
-void controlBuzzer(int distance) {
-  int frequency = calculateBuzzerFrequency(distance);
-  
-  if (frequency > 0) {
-    tone(BUZZER_PIN, frequency);
-  } else {
-    noTone(BUZZER_PIN);
-  }
 }
 
 void loop() {
-  // 取得平均距離
-  int distance = getAverageDistance();
+  unsigned long currentMillis = millis();
   
-  // 輸出距離
-  Serial.print("Distance: ");
-  Serial.print(distance);
-  Serial.println(" cm");
+  // 改進按鈕防彈跳處理
+  if (digitalRead(buttonPin) == LOW) {
+    if (currentMillis - lastButtonPress > DEBOUNCE_DELAY) {
+      welcomeMode = !welcomeMode;
+      Serial.println(welcomeMode ? "進入歡迎模式" : "離開歡迎模式");
+      lastButtonPress = currentMillis;
+    }
+  }
+
+  // 水銀開關偵測裝置是否傾斜
+  if (digitalRead(mercuryPin) == HIGH) {
+    Serial.println("裝置傾斜，進入待命模式");
+    return;
+  }
+
+  if (welcomeMode) {
+    long duration, distance;
+    digitalWrite(trigPin, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trigPin, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trigPin, LOW);
+
+    duration = pulseIn(echoPin, HIGH);
+    
+    // 加入超時檢查
+    if (duration == 0) {
+        Serial.println("超音波感測器讀取超時");
+        return;
+    }
+    
+    distance = duration * 0.034 / 2;
+    
+    // 加入合理範圍檢查
+    if (distance > 400 || distance < 2) {
+        Serial.println("距離超出有效範圍");
+        return;
+    }
+
+    // 加入冷卻時間檢查，避免重複觸發
+    if (distance < 40 && (currentMillis - lastDetectionTime > DETECTION_COOLDOWN)) {
+        Serial.print("偵測到距離: ");
+        Serial.print(distance);
+        Serial.println(" cm");
+        lastDetectionTime = currentMillis;
+
+        // LED 燈效優化
+        welcomeEffect();
+    }
+  }
+}
+
+// 新增 LED 控制函式
+void welcomeEffect() {
+  // 流水燈效果
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(ledPins[i], HIGH);
+    delay(50);  // 縮短延遲時間
+    digitalWrite(ledPins[i], LOW);
+  }
+
+  // 閃爍效果
+  for (int i = 0; i < 2; i++) {  // 減少重複次數
+    for (int j = 0; j < 5; j++) {
+      digitalWrite(ledPins[j], HIGH);
+    }
+    tone(buzzerPin, 1000, 100);  // 縮短蜂鳴器音效
+    delay(100);
+    
+    for (int j = 0; j < 5; j++) {
+      digitalWrite(ledPins[j], LOW);
+    }
+    delay(100);
+  }
+
+  // 平滑的伺服馬達動作
+  for (int pos = 90; pos >= 45; pos--) {
+    myServo.write(pos);
+    delay(5);
+  }
+  tone(buzzerPin, 1500, 100);
   
-  // 根據距離控制 LED
-  digitalWrite(LED_PIN, distance < DISTANCE_THRESHOLD ? HIGH : LOW);
+  for (int pos = 45; pos <= 135; pos++) {
+    myServo.write(pos);
+    delay(5);
+  }
+  tone(buzzerPin, 1800, 100);
   
-  // 控制蜂鳴器
-  controlBuzzer(distance);
-  
-  delay(MEASURE_INTERVAL);
+  for (int pos = 135; pos >= 90; pos--) {
+    myServo.write(pos);
+    delay(5);
+  }
 }
