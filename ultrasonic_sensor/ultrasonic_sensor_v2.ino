@@ -1,140 +1,166 @@
-// 互動歡迎機器人
+// led_music_control.ino
 #include <Servo.h>
 
-// 感測器腳位
+// --- 音符定義與對應 ---
+const char* melody = "ECEC EGG0 FDD ECCE CEC";
+const int melodyLength = 19;
+
+// --- 腳位定義 ---
 const int trigPin = 9;
 const int echoPin = 10;
-const int buzzerPin = 7;
-const int buttonPin = 8;
-const int mercuryPin = 12;
+const int buzzerPin = 6;
+const int buttonPin = 7;
+const int mercuryPin = 8;
+const int ledPins[] = {2, 4, 5, A0, A1};
+const int potPin = A2;
+const int servoPin = 3;
 
-// LED 腳位
-const int ledPins[5] = {2, 3, 4, 5, 6};
-
-// 伺服馬達
-Servo myServo;
-const int servoPin = 11;
-
-// 狀態變數
-bool welcomeMode = true;
-
-// 新增變數
-const unsigned long DEBOUNCE_DELAY = 50;    // 防彈跳延遲時間（毫秒）
-unsigned long lastButtonPress = 0;           // 上次按鈕按下的時間
-unsigned long lastDetectionTime = 0;         // 上次偵測觸發的時間
-const unsigned long DETECTION_COOLDOWN = 3000; // 偵測冷卻時間（毫秒）
+// --- 控制變數 ---
+int selectedLed = 0;
+bool lastButtonState = LOW;
+bool isPlaying = false;
+bool isLocked = false;
+unsigned long lastDebounceTime = 0;
+int melodyIndex = 0;
+Servo servo;
 
 void setup() {
+  Serial.begin(9600);
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   pinMode(buzzerPin, OUTPUT);
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(buttonPin, INPUT);
   pinMode(mercuryPin, INPUT);
-
-  for (int i = 0; i < 5; i++) {
-    pinMode(ledPins[i], OUTPUT);
-    digitalWrite(ledPins[i], LOW);
-  }
-
-  myServo.attach(servoPin);
-  myServo.write(90);  // 初始位置
-
-  Serial.begin(9600);
+  for (int i = 0; i < 5; i++) pinMode(ledPins[i], OUTPUT);
+  servo.attach(servoPin);
+  servo.write(90);
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
-  
-  // 改進按鈕防彈跳處理
-  if (digitalRead(buttonPin) == LOW) {
-    if (currentMillis - lastButtonPress > DEBOUNCE_DELAY) {
-      welcomeMode = !welcomeMode;
-      Serial.println(welcomeMode ? "進入歡迎模式" : "離開歡迎模式");
-      lastButtonPress = currentMillis;
-    }
+  handleButton();
+  updateLedBrightness();
+
+  long distance = readDistanceCM();
+  bool mercuryTilt = digitalRead(mercuryPin);
+
+  if (mercuryTilt) {
+    stopPlayback();
+    isLocked = true;
+    Serial.println("[LOCKED] Mercury switch triggered.");
   }
 
-  // 水銀開關偵測裝置是否傾斜
-  if (digitalRead(mercuryPin) == HIGH) {
-    Serial.println("裝置傾斜，進入待命模式");
+  if (distance < 4) {
+    if (!isLocked) {
+      isPlaying = !isPlaying;
+      Serial.println(isPlaying ? "[PLAY] Start playing." : "[PAUSE] Paused.");
+    } else {
+      Serial.println("[INFO] Locked. Move sensor to unlock.");
+      isLocked = false; // 假設移開物體即解除鎖定
+    }
+    delay(1000); // Debounce
+  }
+
+  if (isPlaying) playMelody();
+  delay(100);
+}
+
+void handleButton() {
+  bool currentButton = digitalRead(buttonPin);
+  if (currentButton == HIGH && lastButtonState == LOW && millis() - lastDebounceTime > 200) {
+    selectedLed = (selectedLed + 1) % 5;
+    Serial.print("[LED] Selected LED: ");
+    Serial.println(selectedLed + 1);
+    lastDebounceTime = millis();
+  }
+  lastButtonState = currentButton;
+}
+
+void updateLedBrightness() {
+  int brightness = analogRead(potPin) / 4;
+  for (int i = 0; i < 5; i++) analogWrite(ledPins[i], i == selectedLed ? brightness : 0);
+}
+
+long readDistanceCM() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH);
+  return duration * 0.034 / 2;
+}
+
+void playMelody() {
+  if (melodyIndex >= melodyLength) {
+    melodyIndex = 0;
+    isPlaying = false;
     return;
   }
 
-  if (welcomeMode) {
-    long duration, distance;
-    digitalWrite(trigPin, LOW);
-    delayMicroseconds(2);
-    digitalWrite(trigPin, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(trigPin, LOW);
+  char note = melody[melodyIndex];
+  if (note != ' ') {
+    Serial.print("[NOTE] Playing: "); Serial.println(note);
+    performServoAction(note);
+    setLEDForNote(note, true);
+    playTone(note);
+    delay(1000);
+    setLEDForNote(note, false);
+    noTone(buzzerPin);
+  }
+  melodyIndex++;
 
-    duration = pulseIn(echoPin, HIGH);
-    
-    // 加入超時檢查
-    if (duration == 0) {
-        Serial.println("超音波感測器讀取超時");
-        return;
-    }
-    
-    distance = duration * 0.034 / 2;
-    
-    // 加入合理範圍檢查
-    if (distance > 400 || distance < 2) {
-        Serial.println("距離超出有效範圍");
-        return;
-    }
-
-    // 加入冷卻時間檢查，避免重複觸發
-    if (distance < 40 && (currentMillis - lastDetectionTime > DETECTION_COOLDOWN)) {
-        Serial.print("偵測到距離: ");
-        Serial.print(distance);
-        Serial.println(" cm");
-        lastDetectionTime = currentMillis;
-
-        // LED 燈效優化
-        welcomeEffect();
-    }
+  if (!isPlaying || isLocked) {
+    isPlaying = false;
   }
 }
 
-// 新增 LED 控制函式
-void welcomeEffect() {
-  // 流水燈效果
-  for (int i = 0; i < 5; i++) {
-    digitalWrite(ledPins[i], HIGH);
-    delay(50);  // 縮短延遲時間
-    digitalWrite(ledPins[i], LOW);
+void playTone(char note) {
+  int freq = 0;
+  switch (note) {
+    case 'C': freq = 262; break;
+    case 'D': freq = 294; break;
+    case 'E': freq = 330; break;
+    case 'F': freq = 349; break;
+    case 'G': freq = 392; break;
+    case '0': freq = 0; break;
   }
+  if (freq > 0) tone(buzzerPin, freq);
+}
 
-  // 閃爍效果
-  for (int i = 0; i < 2; i++) {  // 減少重複次數
-    for (int j = 0; j < 5; j++) {
-      digitalWrite(ledPins[j], HIGH);
-    }
-    tone(buzzerPin, 1000, 100);  // 縮短蜂鳴器音效
-    delay(100);
-    
-    for (int j = 0; j < 5; j++) {
-      digitalWrite(ledPins[j], LOW);
-    }
-    delay(100);
+void performServoAction(char note) {
+  switch (note) {
+    case 'C': servo.write(0); break;
+    case 'D': servo.write(0); break;
+    case 'E': servo.write(180); break;
+    case 'F': servo.write(180); break;
+    case 'G':
+    case '0':
+      servo.write(180);
+      delay(250);
+      servo.write(0);
+      delay(250);
+      break;
   }
+}
 
-  // 平滑的伺服馬達動作
-  for (int pos = 90; pos >= 45; pos--) {
-    myServo.write(pos);
-    delay(5);
+void setLEDForNote(char note, bool on) {
+  int idx = 0;
+  switch (note) {
+    case 'C': idx = 0; break;
+    case 'D': idx = 1; break;
+    case 'E': idx = 2; break;
+    case 'F': idx = 3; break;
+    case 'G': idx = 4; break;
+    default: return;
   }
-  tone(buzzerPin, 1500, 100);
-  
-  for (int pos = 45; pos <= 135; pos++) {
-    myServo.write(pos);
-    delay(5);
-  }
-  tone(buzzerPin, 1800, 100);
-  
-  for (int pos = 135; pos >= 90; pos--) {
-    myServo.write(pos);
-    delay(5);
-  }
+  digitalWrite(ledPins[idx], on ? HIGH : LOW);
+}
+
+void stopPlayback() {
+  isPlaying = false;
+  melodyIndex = 0;
+  noTone(buzzerPin);
+  servo.write(90);
+  for (int i = 0; i < 5; i++) digitalWrite(ledPins[i], LOW);
+  Serial.println("[STOP] Playback stopped.");
 }
