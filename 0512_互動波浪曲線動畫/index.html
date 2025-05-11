@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>互動感測波浪地形視覺化</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #debug {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: monospace;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div id="debug"></div>
+  <script>
+    let cols, rows;
+    let scale = 20; // 調整網格大小
+    let w = 1500;
+    let h = 1000;
+    let flying = 0;
+    let terrain = [];
+    let debugDiv;
+    
+    // 新增顏色和控制參數
+    let colorMode = 0; // 顏色模式
+    let amplitude = 250; // 波浪振幅
+    let noiseScale = 0.15; // 噪波比例
+    let speed = 0.01; // 移動速度
+    
+    // 定義顏色主題
+    const colorThemes = [
+      {base: [50, 100, 255], accent: [150, 200, 255]},    // 海洋藍
+      {base: [255, 100, 150], accent: [255, 200, 100]},   // 夕陽紅
+      {base: [100, 255, 150], accent: [150, 255, 200]},   // 森林綠
+      {base: [147, 112, 219], accent: [221, 160, 221]},   // 紫羅蘭
+      {base: [255, 165, 0], accent: [255, 215, 0]},       // 金橙色
+      {base: [0, 206, 209], accent: [127, 255, 212]},     // 綠松石
+      {base: [255, 20, 147], accent: [255, 182, 193]},    // 桃紅色
+      {base: [46, 139, 87], accent: [152, 251, 152]},     // 翠綠色
+      {base: [138, 43, 226], accent: [230, 230, 250]},    // 深紫色
+      {base: [205, 92, 92], accent: [255, 160, 122]}      // 印第安紅
+    ];
+
+    // Arduino WebSocket 連接
+    let socket;
+    let isConnected = false;
+    
+    // 感測器數據
+    let ultrasonicDistance = 0;  // 超音波感測器距離值
+    let potentiometerValue = 0;  // 可變電阻值
+    
+    // 連接狀態顯示
+    let connectionStatus = "未連接";
+    
+    // WebSocket連接函數
+    function connectWebSocket() {
+      socket = new WebSocket('ws://your-arduino-ip:81');  // 請替換為您的Arduino IP位址
+      
+      socket.onopen = function() {
+        console.log('WebSocket連接成功！');
+        isConnected = true;
+        connectionStatus = "已連接";
+      };
+      
+      socket.onmessage = function(event) {
+        // 解析來自Arduino的數據
+        try {
+          const data = JSON.parse(event.data);
+          ultrasonicDistance = data.distance;  // 0-400 cm
+          potentiometerValue = data.potValue;  // 0-1023
+          
+          // 根據超音波感測器距離更新振幅
+          amplitude = map(ultrasonicDistance, 0, 400, 400, 50);
+          
+          // 根據可變電阻值更新顏色主題
+          colorMode = floor(map(potentiometerValue, 0, 1023, 0, colorThemes.length - 1));
+        } catch (e) {
+          console.error('數據解析錯誤:', e);
+        }
+      };
+      
+      socket.onclose = function() {
+        console.log('WebSocket連接關閉');
+        isConnected = false;
+        connectionStatus = "已斷開";
+        // 5秒後嘗試重新連接
+        setTimeout(connectWebSocket, 5000);
+      };
+      
+      socket.onerror = function(error) {
+        console.error('WebSocket錯誤:', error);
+        connectionStatus = "連接錯誤";
+      };
+    }
+
+    function setup() {
+      createCanvas(windowWidth, windowHeight, WEBGL);
+      debugDiv = document.getElementById('debug');
+      updateTerrainSize();
+      
+      // 添加光源效果
+      lights();
+      shininess(20);
+      
+      // 添加鍵盤事件監聽
+      window.addEventListener('keydown', function(e) {
+        e.preventDefault(); // 防止預設行為
+        
+        // 使用 code 屬性來處理 Mac 鍵盤事件
+        const code = e.code;
+        
+        // 建立提示元素
+        const keyPressed = document.createElement('div');
+        keyPressed.style.position = 'fixed';
+        keyPressed.style.padding = '10px';
+        keyPressed.style.background = 'rgba(0,0,0,0.7)';
+        keyPressed.style.borderRadius = '5px';
+        keyPressed.style.color = 'white';
+        keyPressed.style.left = '50%';
+        keyPressed.style.top = '20px';
+        keyPressed.style.transform = 'translateX(-50%)';
+        keyPressed.style.zIndex = '1000';
+        keyPressed.style.fontFamily = '-apple-system, system-ui, BlinkMacSystemFont';
+        keyPressed.style.fontSize = '14px';
+        keyPressed.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+        document.body.appendChild(keyPressed);
+
+        // 使用 code 進行按鍵判斷
+        switch(code) {
+          case 'KeyC':
+            colorMode = (colorMode + 1) % colorThemes.length;
+            keyPressed.textContent = `🎨 切換顏色主題: ${colorMode + 1}`;
+            break;
+          case 'ArrowUp':
+            amplitude += 10;
+            keyPressed.textContent = `⬆️ 增加波浪高度: ${amplitude}`;
+            break;
+          case 'ArrowDown':
+            amplitude = Math.max(50, amplitude - 10);
+            keyPressed.textContent = `⬇️ 減少波浪高度: ${amplitude}`;
+            break;
+          case 'ArrowLeft':
+            speed = Math.max(0.001, speed - 0.001);
+            keyPressed.textContent = `⬅️ 降低速度: ${speed.toFixed(3)}`;
+            break;
+          case 'ArrowRight':
+            speed = Math.min(0.02, speed + 0.001);
+            keyPressed.textContent = `➡️ 提高速度: ${speed.toFixed(3)}`;
+            break;
+          default:
+            return; // 如果不是我們要處理的按鍵，直接返回
+        }
+
+        // 播放按鍵音效（Mac 風格的輕點聲）
+        const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+        audio.volume = 0.1;
+        audio.play().catch(() => {}); // 忽略可能的自動播放限制錯誤
+        
+        // 2秒後移除提示
+        setTimeout(() => {
+          keyPressed.style.opacity = '0';
+          keyPressed.style.transition = 'opacity 0.3s ease-out';
+          setTimeout(() => {
+            document.body.removeChild(keyPressed);
+          }, 300);
+        }, 2000);
+      });
+
+      // 初始化WebSocket連接
+      connectWebSocket();
+    }
+
+    function updateTerrainSize() {
+      cols = w / scale;
+      rows = h / scale;
+      terrain = [];
+      for (let x = 0; x < cols; x++) {
+        terrain[x] = [];
+        for (let y = 0; y < rows; y++) {
+          terrain[x][y] = 0;
+        }
+      }
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+
+    function draw() {
+      flying -= speed;
+      let yoff = flying;
+
+      // 更新地形
+      for (let y = 0; y < rows; y++) {
+        let xoff = 0;
+        for (let x = 0; x < cols; x++) {
+          terrain[x][y] = map(noise(xoff, yoff), 0, 1, -amplitude, amplitude);
+          xoff += noiseScale;
+        }
+        yoff += noiseScale;
+      }
+
+      background(0);
+      rotateX(PI / 3);
+      translate(-w / 2, -h / 2 - 100);
+
+      // 繪製地形
+      for (let y = 0; y < rows - 1; y++) {
+        beginShape(TRIANGLE_STRIP);
+        for (let x = 0; x < cols; x++) {
+          const h = terrain[x][y];
+          const c = map(h, -amplitude, amplitude, 0, 1);
+          
+          // 使用當前顏色主題
+          const theme = colorThemes[colorMode];
+          const r = map(c, 0, 1, theme.base[0], theme.accent[0]);
+          const g = map(c, 0, 1, theme.base[1], theme.accent[1]);
+          const b = map(c, 0, 1, theme.base[2], theme.accent[2]);
+          
+          fill(r, g, b, 200);
+          stroke(r * 0.8, g * 0.8, b * 0.8);
+          
+          vertex(x * scale, y * scale, terrain[x][y]);
+          vertex(x * scale, (y + 1) * scale, terrain[x][y + 1]);
+        }
+        endShape();
+      }
+
+      // 更新除錯資訊
+      const debugInfo = `
+        FPS: ${frameRate().toFixed(1)}
+        WebSocket: ${connectionStatus}
+        超音波距離: ${ultrasonicDistance.toFixed(1)} cm
+        可變電阻值: ${potentiometerValue}
+        視窗大小: ${windowWidth} x ${windowHeight}
+        地形大小: ${cols} x ${rows}
+        飛行值: ${flying.toFixed(2)}
+        振幅: ${amplitude}
+        速度: ${speed.toFixed(3)}
+        顏色主題: ${colorMode + 1}
+        
+        控制說明:
+        C: 切換顏色主題
+        ↑/↓: 調整波浪高度
+        ←/→: 調整速度
+        (感測器模式下按鍵控制會被覆蓋)
+      `;
+      debugDiv.textContent = debugInfo;
+    }
+  </script>
+</body>
+</html>
