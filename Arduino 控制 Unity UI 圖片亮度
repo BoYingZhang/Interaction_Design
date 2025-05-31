@@ -1,0 +1,75 @@
+# Arduino 控制 Unity UI 圖片亮度 - README
+
+此專案展示如何使用 Arduino 上的 **可變電阻** 控制 Unity 中 UI 圖片（如角色胸口）之亮度效果。適合初學者理解 Arduino 與 Unity 串接原理，並應用在互動式遊戲、裝置藝術、教育媒材等場景。
+
+---
+
+## 🧰 所需材料
+
+### 硬體
+- Arduino UNO x 1
+- 可變電阻（建議使用 B10K）x 1
+- 杜邦線 x 3
+- USB 線 x 1
+
+### 軟體
+- Arduino IDE
+- Unity（2021~2023 LTS 任一版本）
+
+---
+
+## 🔌 Arduino 接線說明
+
+| 可變電阻腳位 | 接到 Arduino |
+|--------------|---------------|
+| 中間腳（Wiper） | A0           |
+| 一側腳         | 5V           |
+| 另一側腳       | GND          |
+
+---
+
+## 🔧 Arduino 程式碼
+
+```cpp
+void setup() {
+  Serial.begin(9600);
+}
+
+void loop() {
+  int val = analogRead(A0);
+  Serial.println(val); // 傳送 0~1023 的數值
+  delay(50);
+}
+```
+
+---
+
+## 💻 Unity 設定步驟
+
+1. 建立一個 UI Canvas
+2. 加入一張 `Image` 元件（作為發亮圖）
+3. 將 `PotToGlow.cs` 腳本掛載至任何 GameObject
+4. 在 Inspector 中拖入剛剛的 `Image` 到 `glowImage` 欄位
+5. 設定 `portName`（Windows 通常為 `COM3`、Mac 請查 `/dev/cu.usbmodemXXXX`）
+
+---
+
+## 📜 腳本說明（PotToGlow.cs）
+
+- 利用 `SerialPort` 類別接收 Arduino 傳來的數值
+- 將數值從 0~1023 映射為 0~1 的透明度
+- 即時更新 UI 圖片的 alpha 值，達到「發亮」效果
+
+---
+
+## 🚀 延伸玩法建議
+
+- 改為控制 SpriteRenderer 的 Emission 或顏色
+- 加入超音波感測器或聲音模組，延伸多樣互動
+- 加入計分系統、遊戲結束條件，設計互動任務
+
+---
+
+製作：Arduino x Unity 控制互動光效範例
+
+© 2025 BoYingZhang 使用用途：專題展示
