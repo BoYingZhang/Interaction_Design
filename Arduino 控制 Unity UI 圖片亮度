@@ -62,7 +62,7 @@ void loop() {
 
 ---
 
-## 🚀 延伸玩法建議
+## 🚀 延伸玩法
 
 - 改為控制 SpriteRenderer 的 Emission 或顏色
 - 加入超音波感測器或聲音模組，延伸多樣互動
