@@ -1,0 +1,243 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Wave Terrain - Apocalypse Modes</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+  <script src="https://unpkg.com/@serialport/web-serial@10.5.0/dist/index.umd.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #debug {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: monospace;
+      z-index: 100;
+      background: rgba(255, 192, 203, 0.85);
+      padding: 10px;
+      border-radius: 5px;
+      border: 1px solid #fff;
+      white-space: pre-line;
+    }
+    #connectBtn {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 100;
+      font-size: 14px;
+      background-color: #ff69b4;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      padding: 8px 12px;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    }
+    #statusMsg {
+      position: fixed;
+      top: 50px;
+      right: 10px;
+      z-index: 100;
+      font-size: 13px;
+      color: white;
+      background-color: #ffb6c1;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <button id="connectBtn">🔌 連接 Arduino</button>
+  <div id="statusMsg">✅ Arduino 已連線</div>
+  <div id="debug"></div>
+
+  <script>
+    let cols, rows;
+    let scale = 25;
+    let w = 1500, h = 1000;
+    let flying = 0;
+    let terrain = [];
+    let amplitude = 200;
+    let speed = 0.02;
+    let terrainMode = 0;
+    let debugDiv;
+    let port, reader, textDecoder;
+    let latestSerialLine = '';
+    let rawAmp = 0;
+    let rawMode = 0;
+    
+    function getTerrainValue(x, y, mode) {
+      if (mode < 1) {
+        // 一般波形
+        return noise(x * 0.1, y * 0.1, flying) * amplitude;
+      } else if (mode < 2) {
+        // 放射狀波形
+        let d = dist(x, y, cols/2, rows/2);
+        return sin(d * 0.1 + flying) * amplitude;
+      } else {
+        // 混合模式
+        let n = noise(x * 0.1, y * 0.1, flying);
+        let d = dist(x, y, cols/2, rows/2);
+        let s = sin(d * 0.1 + flying);
+        return (n + s) * amplitude * 0.5;
+      }
+    }
+
+    const statusMsg = document.getElementById("statusMsg");
+
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+        textDecoder = new TextDecoderStream();
+        port.readable.pipeTo(textDecoder.writable);
+        reader = textDecoder.readable.getReader();
+
+        statusMsg.style.display = 'block';
+
+        setInterval(async () => {
+          if (reader) {
+            try {
+              const { value, done } = await reader.read();
+              if (done) return;
+              if (value) {
+                latestSerialLine = value.trim();
+                // 解析 A 和 M 值
+                if (latestSerialLine.includes('A:') && latestSerialLine.includes('M:')) {
+                  const values = latestSerialLine.split(' ');
+                  rawAmp = parseInt(values[0].split(':')[1]);
+                  rawMode = parseInt(values[1].split(':')[1]);
+                  
+                  // 將 A 值映射到振幅
+                  amplitude = map(rawAmp, 0, 1023, 50, 400);
+                  // 將 M 值映射到模式
+                  terrainMode = map(rawMode, 0, 1023, 0, 2);
+                  
+                  // 更新除錯資訊
+                  debugDiv.innerHTML = `A值: ${rawAmp}\nM值: ${rawMode}\n振幅: ${amplitude.toFixed(2)}\n模式: ${terrainMode.toFixed(2)}`;
+                }
+              }
+            } catch (e) {
+              console.error('Serial read error:', e);
+            }
+          }
+        }, 100);
+      } catch (err) {
+        console.error('Serial connection error:', err);
+      }
+    });
+
+    function handleSerialInput(line) {
+      const match = line.match(/A:(\d+),M:(\d+)/);
+      if (match) {
+        rawAmp = parseInt(match[1]);
+        rawMode = parseInt(match[2]);
+
+        amplitude = constrain(map(rawAmp, 0, 1023, 50, 400), 50, 400);
+        terrainMode = constrain(rawMode, 0, 2);
+      }
+    }
+
+    function setup() {
+      createCanvas(windowWidth, windowHeight, WEBGL);
+      updateTerrainSize();
+      debugDiv = document.getElementById('debug');
+      noStroke();
+    }
+
+    function updateTerrainSize() {
+      cols = w / scale;
+      rows = h / scale;
+      terrain = Array.from({ length: cols }, () => Array(rows).fill(0));
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+
+    function draw() {
+      if (latestSerialLine) handleSerialInput(latestSerialLine);
+
+      flying -= speed;
+      let yoff = flying;
+
+      for (let y = 0; y < rows; y++) {
+        let xoff = 0;
+        for (let x = 0; x < cols; x++) {
+          let val;
+          if (terrainMode === 0) {
+            val = sin((x + frameCount * 0.4) * 0.1) * noise(x * 0.1, y * 0.1 + flying) * amplitude;
+          } else if (terrainMode === 1) {
+            const quakeNoise = noise(xoff, yoff);
+            const quakeBase = sin((x + y + frameCount * 2) * 0.15);
+            const quakeSpike = sin((frameCount + x * y) * 0.02) * 0.5;
+            val = (quakeBase + quakeSpike) * amplitude * quakeNoise;
+          } else {
+            const d = dist(x, y, cols / 2, rows / 2);
+            const pulse = sin(frameCount * 0.2 + d * 0.1);
+            const flicker = noise(x * 0.3, y * 0.3 + frameCount * 0.05);
+            val = pulse * flicker * amplitude * 1.2;
+          }
+          terrain[x][y] = val;
+          xoff += 0.15;
+        }
+        yoff += 0.15;
+      }
+
+      if (terrainMode === 0) background(0, 40, 60);
+      else if (terrainMode === 1) background(30);
+      else background(20, 0, 0);
+
+      rotateX(PI / 3);
+      translate(-w / 2, -h / 2 - 100);
+
+      for (let y = 0; y < rows - 1; y++) {
+        beginShape(TRIANGLE_STRIP);
+        for (let x = 0; x < cols; x++) {
+          const h = terrain[x][y];
+          const c = map(h, -amplitude, amplitude, 0, 1);
+
+          let r, g, b;
+          if (terrainMode === 0) {
+            r = map(c, 0, 1, 240, 80);
+            g = map(c, 0, 1, 255, 180);
+            b = map(c, 0, 1, 255, 120);
+          } else if (terrainMode === 1) {
+            r = map(c, 0, 1, 90, 180);
+            g = map(c, 0, 1, 30, 40);
+            b = map(c, 0, 1, 30, 40);
+          } else {
+            r = map(c, 0, 1, 180, 255);
+            g = map(c, 0, 1, 50, 120);
+            b = map(c, 0, 1, 0, 30);
+          }
+
+          fill(r, g, b, 200);
+          vertex(x * scale, y * scale, terrain[x][y]);
+          vertex(x * scale, (y + 1) * scale, terrain[x][y + 1]);
+        }
+        endShape();
+      }
+
+      debugDiv.textContent =
+        `🎮 實時資料顯示\n` +
+        `A（可變電阻）: ${rawAmp}\n` +
+        `M（模式數值）: ${rawMode}\n` +
+        `振幅 Amplitude: ${amplitude.toFixed(1)}\n` +
+        `目前模式: ${['🌊 Tsunami', '🌍 Earthquake', '🔥 Firestorm'][terrainMode]}\n` +
+        `FPS: ${frameRate().toFixed(1)}\n` +
+        `資料格式: A:<數值>,M:<數值>`;
+    }
+
+    function keyPressed() {
+      if (key === '1') terrainMode = 0;
+      else if (key === '2') terrainMode = 1;
+      else if (key === '3') terrainMode = 2;
+    }
+  </script>
+</body>
+</html>
