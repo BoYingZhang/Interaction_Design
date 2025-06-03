@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -98,6 +97,7 @@
         reader = textDecoder.readable.getReader();
 
         statusMsg.style.display = 'block';
+        console.log('📡 Arduino 連線成功');
 
         setInterval(async () => {
           if (reader) {
@@ -106,16 +106,29 @@
               if (done) return;
               if (value) {
                 latestSerialLine = value.trim();
-                // 解析 A 和 M 值
-                if (latestSerialLine.includes('A:') && latestSerialLine.includes('M:')) {
-                  const values = latestSerialLine.split(' ');
-                  rawAmp = parseInt(values[0].split(':')[1]);
-                  rawMode = parseInt(values[1].split(':')[1]);
+                console.log('收到原始資料:', latestSerialLine);
+                
+                const aMatch = latestSerialLine.match(/A:(\d+)/);
+                const mMatch = latestSerialLine.match(/M:(\d+)/);
+                
+                if (aMatch && mMatch) {
+                  rawAmp = parseInt(aMatch[1]);
+                  rawMode = parseInt(mMatch[1]);
                   
-                  // 將 A 值映射到振幅
-                  amplitude = map(rawAmp, 0, 1023, 50, 400);
-                  // 將 M 值映射到模式
-                  terrainMode = map(rawMode, 0, 1023, 0, 2);
+                  // 根據不同區段設定對應的震幅值
+                  if (rawAmp <= 100) amplitude = 40;
+                  else if (rawAmp <= 200) amplitude = 80;
+                  else if (rawAmp <= 300) amplitude = 120;
+                  else if (rawAmp <= 400) amplitude = 160;
+                  else if (rawAmp <= 500) amplitude = 200;
+                  else if (rawAmp <= 600) amplitude = 240;
+                  else if (rawAmp <= 700) amplitude = 280;
+                  else if (rawAmp <= 800) amplitude = 320;
+                  else if (rawAmp <= 900) amplitude = 360;
+                  else amplitude = 400;
+
+                  // 設定模式 (0=海嘯、1=地震、2=火災)
+                  terrainMode = constrain(rawMode, 0, 2);
                   
                   // 更新除錯資訊
                   debugDiv.innerHTML = `A值: ${rawAmp}\nM值: ${rawMode}\n振幅: ${amplitude.toFixed(2)}\n模式: ${terrainMode.toFixed(2)}`;
@@ -137,7 +150,30 @@
         rawAmp = parseInt(match[1]);
         rawMode = parseInt(match[2]);
 
-        amplitude = constrain(map(rawAmp, 0, 1023, 50, 400), 50, 400);
+        // 根據不同區段設定對應的震幅值
+        if (rawAmp <= 100) {
+          amplitude = 40;
+        } else if (rawAmp <= 200) {
+          amplitude = 80;
+        } else if (rawAmp <= 300) {
+          amplitude = 120;
+        } else if (rawAmp <= 400) {
+          amplitude = 160;
+        } else if (rawAmp <= 500) {
+          amplitude = 200;
+        } else if (rawAmp <= 600) {
+          amplitude = 240;
+        } else if (rawAmp <= 700) {
+          amplitude = 280;
+        } else if (rawAmp <= 800) {
+          amplitude = 320;
+        } else if (rawAmp <= 900) {
+          amplitude = 360;
+        } else {
+          amplitude = 400;
+        }
+
+        // 設定模式 (0=海嘯、1=地震、2=火災)
         terrainMode = constrain(rawMode, 0, 2);
       }
     }
@@ -224,10 +260,11 @@
       }
 
       debugDiv.textContent =
-        `🎮 實時資料顯示\n` +
-        `A（可變電阻）: ${rawAmp}\n` +
-        `M（模式數值）: ${rawMode}\n` +
-        `振幅 Amplitude: ${amplitude.toFixed(1)}\n` +
+        `📊 實時資料顯示\n` +
+        `原始資料: ${latestSerialLine}\n` +
+        `A（可變電阻）: ${rawAmp} ${isNaN(rawAmp) ? '❌' : '✅'}\n` +
+        `M（模式數值）: ${rawMode} ${isNaN(rawMode) ? '❌' : '✅'}\n` +
+        `振幅 Amplitude: ${isNaN(amplitude) ? 'ERROR' : amplitude.toFixed(1)}\n` +
         `目前模式: ${['🌊 Tsunami', '🌍 Earthquake', '🔥 Firestorm'][terrainMode]}\n` +
         `FPS: ${frameRate().toFixed(1)}\n` +
         `資料格式: A:<數值>,M:<數值>`;

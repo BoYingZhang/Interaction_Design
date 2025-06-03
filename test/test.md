@@ -1,97 +1,83 @@
-# 🌋 v2_Terra Apocalypsis
+# 🌋 Test.html 專案說明：互動式地形動畫控制
 
-An interactive 3D terrain simulation visualized via `p5.js` and controlled in real-time using Arduino input over the Web Serial API.
-
----
-
-## 🧠 Features
-
-- 🌊 **Tsunami Mode** – smooth wave-like undulations
-- 🌍 **Earthquake Mode** – chaotic terrain shake
-- 🔥 **Firestorm Mode** – central pulsing flicker
-- 🎛️ Real-time control via Arduino (potentiometer + button)
-- 📟 On-screen debug panel: shows FPS, mode, amplitude, and serial input
-- 💖 Soft pink cyberpunk-style UI
+此專案使用 Arduino + p5.js + Web Serial API，搭配一顆可變電阻與一顆按鈕，產生互動式的 3D 地形視覺動畫。可變電阻分段控制振幅，按鈕控制地形樣式（模式）。
 
 ---
 
-## 🕹️ How to Use
+## 🧠 功能說明
 
-1. Upload the Arduino sketch (`v2_terra_apocalypsis.ino`) to your Arduino UNO
-2. Open `v2_terra_apocalypsis_complete.html` in a [Web Serial-supported browser](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API) (Chrome recommended)
-3. Click **🔌 Connect Arduino**
-4. Adjust the **potentiometer** and press the **button** to control terrain in real time
-
----
-
-## 🔌 Arduino Setup
-
-- **Potentiometer** to `A0`
-- **Button** to `D2` (configured as `INPUT_PULLUP`)
-
-### Output Format:
-```
-A:<amplitude_value>,M:<mode_value>
-```
-
-### Example:
-```
-A:512,M:2
-```
-
-- `A`: Analog value from potentiometer (0–1023), mapped to amplitude
-- `M`: Mode (0 = tsunami, 1 = earthquake, 2 = firestorm)
+- 📡 Web Serial 串接 Arduino
+- 🎛️ 可變電阻（A）控制振幅，分成 10 段階梯式顯示
+- 🔘 按鈕（M）切換地形動畫模式
+- 🌈 p5.js 畫面自動更新地形與顏色
+- 🐞 左上角 debug 顯示 A/M/振幅/模式/FPS
 
 ---
 
-## 💾 Arduino Code (`v2_terra_apocalypsis.ino`)
-```cpp
-const int potPin = A0;
-const int buttonPin = 2;
+## 🔌 硬體設定
 
-int mode = 0;
-int lastButtonState = HIGH;
-unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 50;
-
-void setup() {
-  pinMode(buttonPin, INPUT_PULLUP);
-  Serial.begin(9600);
-}
-
-void loop() {
-  int amp = analogRead(potPin);
-
-  int reading = digitalRead(buttonPin);
-  if (reading == LOW && lastButtonState == HIGH && (millis() - lastDebounceTime) > debounceDelay) {
-    mode = (mode + 1) % 3;
-    lastDebounceTime = millis();
-  }
-  lastButtonState = reading;
-
-  Serial.print("A:");
-  Serial.print(amp);
-  Serial.print(",M:");
-  Serial.println(mode);
-
-  delay(30);
-}
-```
+| 裝置         | 腳位 | 功能         |
+|--------------|------|--------------|
+| 可變電阻      | A0   | 控制振幅（A） |
+| 按鈕（2 Pin） | D2   | 控制模式（M） |
+| Arduino UNO   | USB  | 傳送序列資料 |
 
 ---
 
-## 🧪 Debug Tips
+## 🎚️ 振幅控制邏輯（A）
 
-| Issue | Possible Cause | Solution |
-|-------|----------------|----------|
-| ❌ No connection | Browser doesn’t support Web Serial | Use Chrome |
-| ❌ No response | Serial format mismatch | Ensure output is like `A:xxx,M:x` |
-| ❌ No visual change | Data parsed incorrectly | Check `handleSerialInput()` in p5.js |
-| ✅ Want to trace | Use `console.log()` in `draw()` | Log `rawAmp`, `rawMode` |
+將 A 值（0–1023）分為 10 段區間，對應不同振幅數值：
+
+| A 值區間     | 對應振幅 amplitude |
+|--------------|--------------------|
+| 0–100        | 40                 |
+| 101–200      | 80                 |
+| 201–300      | 120                |
+| 301–400      | 160                |
+| 401–500      | 200                |
+| 501–600      | 240                |
+| 601–700      | 280                |
+| 701–800      | 320                |
+| 801–900      | 360                |
+| 901–1023     | 400                |
 
 ---
 
-## 📁 Files
+## 🌐 地形模式邏輯（M）
 
-- `v2_terra_apocalypsis_complete.html` – Main visual + Web Serial
-- `v2_terra_apocalypsis.ino` – Arduino sketch
+M 值透過按鈕控制，對應三種地形樣式：
+
+| M 值 | 地形模式         |
+|------|------------------|
+| 0    | 🌊 Tsunami       |
+| 1    | 🌍 Earthquake    |
+| 2    | 🔥 Firestorm     |
+
+---
+
+## 📋 畫面資訊顯示
+
+畫面左上角會顯示以下資訊，供即時偵錯與觀察：
+
+- `A（可變電阻）`: 目前的原始數值
+- `M（模式數值）`: 目前選擇的模式（0–2）
+- `Amplitude`: 根據 A 對應的振幅值
+- `模式名稱`: Tsunami / Earthquake / Firestorm
+- `FPS`: 畫面更新頻率
+
+---
+
+## 📂 專案檔案
+
+| 檔案名稱   | 說明                         |
+|------------|------------------------------|
+| test.html  | 主程式，包含動畫與 Web Serial |
+| test.ino   | Arduino 腳本（傳送 A/M）      |
+
+---
+
+## 🧩 可擴充方向
+
+- 將地形加入音訊反應（音頻觸發）
+- 顏色樣式改為 HSV 動態變色
+- 增加模式轉場動畫或音效配合
